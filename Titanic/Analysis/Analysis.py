@@ -6,12 +6,13 @@ import sklearn.metrics as mcs
 import missingno as msno
 from scipy.stats import zscore
 from sklearn.model_selection import train_test_split
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator
 from sklearn.base import TransformerMixin
+from sklearn.model_selection import GridSearchCV
 
 # Ładowanie danych
 df = pd.read_csv('/Users/dominiksuszek/git/pjatk-pum/Titanic/titanic.csv')
@@ -103,7 +104,7 @@ class FeaturesAdder(BaseEstimator, TransformerMixin):
         # Dodaj zmienną 'MPC'
         X['MPC'] = X['age'] * X['pclass']
 
-        return 
+        return X
 
 class AgeImputer(BaseEstimator, TransformerMixin):
 
@@ -161,8 +162,8 @@ class FeaturesDropper(BaseEstimator, TransformerMixin):
         return self
     
     def transform(self, X):
-        return X.drop(columns=['name', 'cabin', 'boat', 'ticket', 'body', 'home_dest', 'embarked'], axis=1, errors="ignore")
-
+        return X.drop(['name', 'cabin', 'boat', 'ticket', 'body', 'home_dest', 'embarked'], axis=1, errors="ignore")
+    
 class FeaturesAdjuster(BaseEstimator, TransformerMixin):
 
     def fit(self, X):
@@ -178,16 +179,15 @@ class FeaturesAdjuster(BaseEstimator, TransformerMixin):
 
 
 # Dodaj potok transformujący
-trans_pipeline = Pipeline([
-    # ('age_imputer', AgeImputer()),
+full_pipeline = Pipeline([
+    ('age_imputer', AgeImputer()),
     ('fare_imputer', FareImputer()),
     ('features_adder', FeaturesAdder()),
-    # ('features_dropper', FeaturesDropper()),
-    # ('features_adjuster', FeaturesAdjuster()),
+    ('features_dropper', FeaturesDropper()),
+    ('features_adjuster', FeaturesAdjuster()),
     ('outliers_remover', OutliersRemover()),
 ])
-train_dataset_adjusted = FareImputer.fit_transform(train_dataset)
-train_dataset_adjusted = trans_pipeline.fit_transform(train_dataset)
+train_dataset_adjusted = full_pipeline.fit_transform(train_dataset)
 
 # Przycięcie odstających wartości
 # Zaznacz outliery dla zmiennej 'age' na wykresie punktowym
@@ -221,20 +221,44 @@ plt.show()
 
 
 X_train_adjusted = train_dataset_adjusted.drop('survived', axis=1)
-y_train_adjusted = train_dataset_adjusted['survived']
+X_train_adjusted = train_dataset_adjusted.drop('title', axis=1)
+y_train = train_dataset_adjusted['survived']
+
 
 print(X_train_adjusted.dtypes)
-print(X_train_adjusted.head())
+print(X_train_adjusted)
 
 # Normalizacja danych numerycznych
 scaler = MinMaxScaler()
-X_train_adjusted = scaler.fit_transform(X_train_adjusted)
+X_train_adjusted_scaled = scaler.fit_transform(X_train_adjusted)
 print(X_train_adjusted_scaled.head())
 
 # Trenowanie modelu
-tree_classifier = DecisionTreeClassifier(random_state=13)
-tree_classifier.fit(X_train_adjusted, y_train)
-y_pred = tree_classifier.predict(X_test)
+rfc = RandomForestClassifier()
+
+param_grid = [
+    {"n_estimators": [10, 100, 200, 500], "max_depth": [None, 5, 10], "min_samples_split": [2, 3, 4]}
+]
+
+grid_search = GridSearchCV(rfc, param_grid, cv=3, scoring="accuracy", return_train_score=True)
+grid_search.fit(X_train_adjusted_scaled, y_train)
+
+grid_search.best_params_
+final_rfc = grid_search.best_estimator_
+
+test_dataset_adjusted = full_pipeline.fit_transform(test_dataset)
+X_test_prepared = full_pipeline.fit_transform(test_dataset_adjusted)
+X_test_prepared = X_test_prepared.drop('survived', axis=1)
+X_test_prepared = X_test_prepared.drop('title', axis=1)
+y_test = test_dataset_adjusted['survived'].copy()
+scaler.fit_transform(X_test_prepared)
+
+final_rfc.score(X_train_adjusted_scaled, y_train)
+y_pred = final_rfc.predict(X_test_prepared)
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(y_train, y_pred)
+
+accuracy_score = mcs.accuracy_score(y_test, y_pred)
 
 print(mcs.accuracy_score(y_test, y_pred))
 
