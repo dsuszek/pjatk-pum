@@ -2,10 +2,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-import sklearn.metrics as mcs
-import missingno as msno
-from scipy.stats import zscore
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -13,9 +9,10 @@ from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator
 from sklearn.base import TransformerMixin
 from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score, accuracy_score
 
 # Ładowanie danych
-df = pd.read_csv('/Users/dominiksuszek/git/pjatk-pum/Titanic/titanic.csv')
+df = pd.read_csv('Titanic/Analysis/titanic.csv')
 
 ######################################################################################################################
 # 1. Analiza zbioru danych
@@ -33,57 +30,69 @@ plt.title('Macierz korelacji')
 plt.show()
 
 # Dla ilu rekordów brakuje danych w kolumnach: age, cabin, embarked, boat, body?
-null_counts = pd.DataFrame(df.isnull().sum())
-print(null_counts)
-
-msno.bar(null_counts, figsize=(10, 6), fontsize=12, labels=None, label_rotation=45, log=False, color='dimgray', filter=None, n=0, p=0, sort=None, ax=None, orientation=None)
+null_counts = pd.DataFrame(df.isnull().sum(), columns=['Null Counts'])
+plt.bar(null_counts.index, null_counts['Null Counts'], color='dimgray')
+plt.xticks(rotation=45, ha='right')
+plt.xlabel('Columns')
+plt.ylabel('Brakujące wartości')
+plt.title('Brakujące wartości w zbiorze danych')
+for i, value in enumerate(null_counts['Null Counts']):
+    plt.text(i, value + 1, str(value), ha='center', va='bottom', fontsize=10)
 plt.show()
 
 # Wykres pokazujący zalezność pomiędzy klasą, którą podrózowała dana osoba, a tym, czy przezyła
 plt.clf()
-sns.catplot(data=df,
-            x='pclass',
-            kind='count',
-            hue='survived')
-plt.show
+ax = sns.countplot(data=df, x='pclass', hue='survived')
+ax.set_ylabel('Liczba osób')
+ax.set_xlabel('Klasa biletu')
+ax.tick_params(
+    axis='x',                 
+    top=False)     
+# Add annotations on top of each bar
+for p in ax.patches:
+    ax.annotate(f'{p.get_height()}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                ha='center', va='center', xytext=(0, 10), textcoords='offset points', fontsize=8)
+plt.show()
 
 # Wykres pokazujący zaleznosc pomiędzy wiekiem, a liczbą osób, które przezyły
 sns.distplot(df[df['age'].notnull() & (df['survived']==1)]['age'], 
-             kde_kws={"label": "Survived"}, 
+             kde_kws={"label": "Przeżył"}, 
              bins=10)
 sns.distplot(df[df['age'].notnull() & (df['survived']==0)]['age'], 
-             kde_kws={"label": "Not Survived"}, 
+             kde_kws={"label": "Nie przeżył"}, 
              bins=10)
 plt.show()
 
-# Podział zbioru danych na dane treningowe i testowe
+
+# Wykres pokazujący rozkłady empiryczne zmiennych sex, survived, pclass
+plt.figure(figsize=(12, 6))
+
+# Zmienna 'sex'
+plt.subplot(1, 3, 1)
+sns.countplot(x='sex', data=df)
+plt.title('Histogram zmiennej \'sex\'')
+plt.ylabel('Liczba rekordów')
+
+# Zmienna 'survived'
+plt.subplot(1, 3, 2)
+sns.countplot(x='survived', data=df)
+plt.title('Histogram zmiennej \'survived\'')
+plt.ylabel('Liczba rekordów')
+
+# Zmienna 'pclass'
+plt.subplot(1, 3, 3)
+sns.countplot(x='pclass', data=df)
+plt.title('Histogram zmiennej \'pclass\'')
+plt.ylabel('Liczba rekordów')
+
+plt.tight_layout()
+plt.show()
+
+# Podział zbioru danych na dane treningowe i testowe - próbkowanie warstwowe na podstawie zmiennych 'survived', 'pclass', oraz 'sex'
 stratified_split = StratifiedShuffleSplit(n_splits=1, test_size=0.2)
-for train_indices, test_indices in stratified_split.split(df, df[['survived', 'pclass', 'sex']]):
+for train_indices, test_indices in stratified_split.split(df, df[['survived', 'sex', 'pclass']]):
     train_dataset = df.loc[train_indices]
     test_dataset = df.loc[test_indices]
-
-# Sprawdzenie, czy oba zbiory danych - treningowy i testowy zawierają takie same proporcje osób, które przezyly
-plt.clf()
-plt.subplot(1, 2, 1)
-train_dataset['survived'].hist()
-plt.tick_params(
-    axis='x',          
-    which='both',      
-    bottom=False,      
-    top=False,         
-    labelbottom=False) 
-plt.title('Train dataset')
-
-plt.subplot(1, 2, 2)
-test_dataset['survived'].hist()
-plt.tick_params(
-    axis='x',          
-    which='both',      
-    bottom=False,      
-    top=False,         
-    labelbottom=False) 
-plt.title('Test dataset')
-plt.show()
 
 ######################################################################################################################
 # 2. Inżynieria cech
@@ -187,18 +196,19 @@ full_pipeline = Pipeline([
     ('features_adjuster', FeaturesAdjuster()),
     ('outliers_remover', OutliersRemover()),
 ])
+
 train_dataset_adjusted = full_pipeline.fit_transform(train_dataset)
 
 # Przycięcie odstających wartości
 # Zaznacz outliery dla zmiennej 'age' na wykresie punktowym
 plt.clf()
-plt.scatter(train_dataset.index, train_dataset['age'], label='Data Points')
-plt.scatter(train_dataset[train_dataset['age'] > 67].index, train_dataset[train_dataset['age'] > 67]['age'], color='red', label='Outliers')
-# Dodaj etykiety osi
-plt.xlabel('Index')
-plt.ylabel('Age')
+plt.scatter(train_dataset.index, train_dataset['age'], label='Dane mieszczące się w normie')
+plt.scatter(train_dataset[train_dataset['age'] > 67].index, train_dataset[train_dataset['age'] > 67]['age'], color='red', label='Wartości odstające')
+# Dostosuj etykiety osi
+plt.xticks([])
+plt.ylabel('Wiek')
 # Dodaj tytuł wykresu
-plt.title('Scatter Plot with Outliers')
+plt.title('Wartości odstające dla zmiennej age')
 # Dodaj legendę
 plt.legend()
 # Wyświetl wykres
@@ -207,31 +217,25 @@ plt.show()
 
 # Zaznacz outliery dla zmiennej 'fare' na wykresie punktowym
 plt.clf()
-plt.scatter(train_dataset.index, train_dataset['fare'], label='Data Points')
-plt.scatter(train_dataset[train_dataset['fare'] > 200].index, train_dataset[train_dataset['fare'] > 200]['fare'], color='red', label='Outliers')
-# Dodaj etykiety osi
-plt.xlabel('Index')
-plt.ylabel('Fare')
+plt.scatter(train_dataset.index, train_dataset['fare'], label='Dane mieszczące się w normie')
+plt.scatter(train_dataset[train_dataset['fare'] > 200].index, train_dataset[train_dataset['fare'] > 200]['fare'], color='red', label='Wartości odstające')
+# Dostosuj etykiety osi
+plt.xticks([])
+plt.ylabel('Opłata za bilet')
 # Dodaj tytuł wykresu
-plt.title('Scatter Plot with Outliers')
+plt.title('Wartości odstające dla zmiennej fare')
 # Dodaj legendę
 plt.legend()
 # Wyświetl wykres
 plt.show()
 
 
-X_train_adjusted = train_dataset_adjusted.drop('survived', axis=1)
-X_train_adjusted = train_dataset_adjusted.drop('title', axis=1)
+X_train_adjusted = train_dataset_adjusted.drop(['title', 'survived'], axis=1)
 y_train = train_dataset_adjusted['survived']
-
-
-print(X_train_adjusted.dtypes)
-print(X_train_adjusted)
 
 # Normalizacja danych numerycznych
 scaler = MinMaxScaler()
 X_train_adjusted_scaled = scaler.fit_transform(X_train_adjusted)
-print(X_train_adjusted_scaled.head())
 
 # Trenowanie modelu
 rfc = RandomForestClassifier()
@@ -245,21 +249,25 @@ grid_search.fit(X_train_adjusted_scaled, y_train)
 
 grid_search.best_params_
 final_rfc = grid_search.best_estimator_
+final_rfc_results = grid_search.cv_results_
+for mean_score, params in zip(final_rfc_results["mean_test_score"], final_rfc_results["params"]):
+    print(np.sqrt(mean_score), params)
+
+feature_importances = grid_search.best_estimator_.feature_importances_
+feature_importances
 
 test_dataset_adjusted = full_pipeline.fit_transform(test_dataset)
-X_test_prepared = full_pipeline.fit_transform(test_dataset_adjusted)
-X_test_prepared = X_test_prepared.drop('survived', axis=1)
-X_test_prepared = X_test_prepared.drop('title', axis=1)
-y_test = test_dataset_adjusted['survived'].copy()
-scaler.fit_transform(X_test_prepared)
-
-final_rfc.score(X_train_adjusted_scaled, y_train)
-y_pred = final_rfc.predict(X_test_prepared)
-from sklearn.metrics import confusion_matrix
-cm = confusion_matrix(y_train, y_pred)
-
-accuracy_score = mcs.accuracy_score(y_test, y_pred)
-
-print(mcs.accuracy_score(y_test, y_pred))
+X_test_prepared = test_dataset_adjusted.drop(['title', 'survived'], axis=1)
+y_test = test_dataset_adjusted['survived']
+X_test_prepared = scaler.fit_transform(X_test_prepared)
 
 # Ewaluacja modeli, dostrajanie, analiza
+y_pred = final_rfc.predict(X_test_prepared)
+
+accuracy_score(y_test, y_pred)
+precision_score(y_test, y_pred)
+recall_score(y_test, y_pred)
+f1_score(y_test, y_pred)
+
+cm = confusion_matrix(y_test, y_pred)
+cm
