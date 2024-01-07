@@ -12,7 +12,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score, accuracy_score
 
 # Ładowanie danych
-df = pd.read_csv('Titanic/Analysis/titanic.csv')
+df = pd.read_csv('Analysis/titanic.csv')
 
 ######################################################################################################################
 # 1. Analiza zbioru danych
